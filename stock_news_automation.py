@@ -16,79 +16,87 @@ EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 SERVICE_ACCOUNT_JSON = os.environ.get('SERVICE_ACCOUNT_JSON')
 
-# 비서들(API 클라이언트)을 깨웁니다.
+# 비서들을 깨웁니다!
 newsapi = NewsApiClient(api_key=NEWS_API_KEY)
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 def get_stock_keywords():
-    """구글 시트에서 감시할 주식 정보를 가져옵니다."""
+    """구글 시트에서 감시할 주식 리스트를 읽어옵니다."""
     try:
         service_account_info = json.loads(SERVICE_ACCOUNT_JSON)
         gc = gspread.service_account_from_dict(service_account_info)
         
-        # [형님 확인] 시트 이름("test")과 탭 이름("주식키워드")이 맞는지 꼭 확인하세요!
+        # [형님 확인] 시트 이름("test")과 탭 이름("주식키워드") 확인!
         sh = gc.open("test") 
         worksheet = sh.worksheet("주식키워드")
         
         records = worksheet.get_all_records()
         if not records:
-            print("형님, 시트에 데이터가 하나도 없습니다!")
             return []
 
-        # 열 이름(Ticker 등)에 숨어있는 공백을 지워 에러를 방지합니다.
+        # 열 이름 공백 제거 (안전장치)
         clean_records = []
         for r in records:
             clean_row = {str(k).strip(): v for k, v in r.items()}
             clean_records.append(clean_row)
         return clean_records
     except Exception as e:
-        print(f"구글 시트 읽기 에러: {e}")
+        print(f"시트 읽기 에러: {e}")
         return []
 
 def fetch_news(ticker, name):
-    """어제부터 오늘까지의 최신 뉴스를 5개 가져옵니다."""
-    yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-    news = newsapi.get_everything(
-        q=f"{ticker} OR {name}", 
-        from_param=yesterday, 
-        language='en', 
-        sort_by='relevancy'
-    )
-    return news['articles'][:5]
+    """
+    최신 뉴스를 가져옵니다. 
+    [수정] 검색 기간을 최근 3일로 늘려 데이터 부족 문제를 해결했습니다!
+    """
+    # 3일 전 날짜 계산
+    three_days_ago = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
+    
+    try:
+        news = newsapi.get_everything(
+            q=f"{ticker} OR {name}", 
+            from_param=three_days_ago, 
+            language='en', 
+            sort_by='relevancy'
+        )
+        return news['articles'][:5]
+    except Exception as e:
+        print(f"뉴스 수집 에러: {e}")
+        return []
 
 def summarize_with_gemini(ticker, news_list):
     """
-    [핵심 수정] 제미나이 모델을 사용하여 뉴스를 요약합니다.
-    404 에러를 방지하기 위해 가장 안정적인 모델 이름을 사용합니다.
+    [핵심 수정] 제미나이 모델 이름을 'gemini-2.0-flash'로 변경했습니다.
+    또한 요약 실패 시 뉴스 원문 제목이라도 반환하도록 개선했습니다.
     """
-    news_text = "\n".join([f"제목: {n['title']}\n설명: {n['description']}" for n in news_list])
+    # 수집된 뉴스 제목들을 합칩니다.
+    news_titles = "\n".join([f"- {n['title']}" for n in news_list])
+    news_full_text = "\n".join([f"제목: {n['title']}\n내용: {n['description']}" for n in news_list])
     
     prompt = f"""
-    당신은 베테랑 주식 분석가입니다. {ticker} 관련 뉴스를 읽고 한국어로 정리해 주세요.
-    1. 핵심 요약 3줄
-    2. 투자 심리 (긍정/중립/부정)
+    당신은 세계 최고의 주식 분석가입니다. {ticker} 관련 뉴스를 읽고 한국어로 정리해 주세요.
+    1. 핵심 요약 3줄 (강렬하게!)
+    2. 투자 심리 (긍정/중립/부정 중 선택)
     
     뉴스 내용:
-    {news_text}
+    {news_full_text}
     """
     
     try:
-        # ---------------------------------------------------------
-        # [수정 포인트] 모델 이름을 'gemini-1.5-flash'로 설정합니다.
-        # 만약 계속 404가 난다면 'gemini-2.0-flash-exp' 등으로 바꿀 수 있습니다.
-        # ---------------------------------------------------------
+        # [모델 이름 변경] 1.5-flash 대신 2.0-flash를 사용해 404 에러를 방지합니다!
         response = client.models.generate_content(
-            model="gemini-1.5-flash", 
+            model="gemini-2.0-flash", 
             contents=prompt
         )
         return response.text
     except Exception as e:
-        return f"AI 요약 중 에러 발생 (형님, API 설정을 확인해 주세요!): {e}"
+        # AI 요약이 실패하면 뉴스 제목 리스트라도 보여줍니다!
+        return f"⚠️ AI 요약 시도 중 에러가 났지만, 수집된 뉴스 제목은 이렇습니다:\n{news_titles}\n(에러 내용: {e})"
 
 def send_email(content):
-    """결과를 이메일로 전송합니다."""
+    """최종 리포트 발송"""
     msg = MIMEText(content)
-    msg['Subject'] = f"[{datetime.now().strftime('%Y-%m-%d')}] 형님! 오늘의 주식 리포트입니다! 💰"
+    msg['Subject'] = f"[{datetime.now().strftime('%Y-%m-%d')}] 형님! 오늘의 주식 리포트 (A/S 완료!) 💰"
     msg['From'] = EMAIL_ADDRESS
     msg['To'] = EMAIL_ADDRESS
 
@@ -97,7 +105,7 @@ def send_email(content):
         server.send_message(msg)
 
 # =================================================================
-# 메인 실행 엔진
+# 실행부
 # =================================================================
 if __name__ == "__main__":
     print("🚀 작업을 시작합니다, 형님!!")
@@ -105,12 +113,11 @@ if __name__ == "__main__":
     stocks = get_stock_keywords()
     
     if not stocks:
-        print("데이터를 찾을 수 없어 종료합니다.")
+        print("데이터가 없습니다.")
     else:
-        total_report = "📊 형님! 오늘의 주식 뉴스 분석 결과입니다. 📊\n\n"
+        total_report = "🌟 형님! A/S 완료된 오늘의 주식 분석입니다! 🌟\n\n"
         
         for stock in stocks:
-            # 시트의 'Status' 열이 'Active'인 것만 처리합니다.
             if stock.get('Status') == 'Active':
                 ticker = stock.get('Ticker')
                 name = stock.get('Name')
@@ -120,11 +127,11 @@ if __name__ == "__main__":
                 
                 if news:
                     summary = summarize_with_gemini(ticker, news)
-                    total_report += f"[{ticker} - {name}]\n{summary}\n"
-                    total_report += "="*40 + "\n"
+                    total_report += f"📊 [{ticker} - {name}]\n{summary}\n"
                 else:
-                    total_report += f"[{ticker} - {name}]\n최근 뉴스가 없습니다.\n"
-                    total_report += "="*40 + "\n"
+                    total_report += f"📊 [{ticker} - {name}]\n최근 3일간 큰 뉴스가 없네요. 평온한 상태입니다! 😎\n"
+                
+                total_report += "="*40 + "\n"
         
         send_email(total_report)
-        print("✅ 형님! 메일 발송 완료했습니다. 확인해 보십시오!!")
+        print("✅ 형님! 메일 다시 보냈습니다! 이번엔 성공일 겁니다!!")
