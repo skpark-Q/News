@@ -1,106 +1,115 @@
-import os
-import smtplib
-import time
-import urllib.parse
-import requests
+import os, smtplib, time, urllib.parse, requests
+import yfinance as yf # 🔥 주가 데이터용
 from bs4 import BeautifulSoup
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
-# =================================================================
-# [형님 설정 포인트] 깃허브 Secrets에 이 두가지만 정확히 있으면 됩니다!
-# =================================================================
+# [환경 변수]
 EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-# 형님이 지정하신 무적의 16개 브랜드 리스트
-BRANDS = [
-    "애플", "마이크로소프트", "엔비디아", "알파벳", "아마존", 
-    "메타", "테슬라", "브로드컴", "일라이 릴리", "비자", 
-    "존슨앤존슨", "오라클", "버크셔 해서웨이", "팔란티어", "월마트", "코스트코"
-]
+# 🔥 [형님 설정] 종목명, 티커, 제외 키워드 매핑
+STOCK_MAP = {
+    "애플": {"ticker": "AAPL", "exclude": ""},
+    "마이크로소프트": {"ticker": "MSFT", "exclude": ""},
+    "엔비디아": {"ticker": "NVDA", "exclude": ""},
+    "알파벳": {"ticker": "GOOGL", "exclude": "유튜브"}, # 예: 유튜브 제외 원하시면 추가
+    "아마존": {"ticker": "AMZN", "exclude": "밀림"},
+    "메타": {"ticker": "META", "exclude": "메타버스 meta-verse"}, # 🔥 메타버스 제외
+    "테슬라": {"ticker": "TSLA", "exclude": ""},
+    "브로드컴": {"ticker": "AVGO", "exclude": ""},
+    "일라이 릴리": {"ticker": "LLY", "exclude": ""},
+    "비자": {"ticker": "V", "exclude": "입국 비자"}, # 🔥 비자 거절 등 뉴스 제외
+    "존슨앤존슨": {"ticker": "JNJ", "exclude": ""},
+    "오라클": {"ticker": "ORCL", "exclude": ""},
+    "버크셔 해서웨이": {"ticker": "BRK-B", "exclude": ""},
+    "팔란티어": {"ticker": "PLTR", "exclude": ""},
+    "월마트": {"ticker": "WMT", "exclude": ""},
+    "코스트코": {"ticker": "COST", "exclude": ""}
+}
 
-def fetch_google_news(brand):
-    """
-    구글 뉴스에서 브랜드별 주식 관련 뉴스를 3개씩 크롤링합니다.
-    한국어로 검색하므로 별도의 번역이 필요 없습니다!
-    """
+def get_stock_data(ticker):
+    """실시간 주가, 등락률, 시가총액 정보를 가져옵니다."""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.fast_info
+        # 현재가, 등락률 계산
+        current_price = info['last_price']
+        prev_close = info['previous_close']
+        change_pct = ((current_price - prev_close) / prev_close) * 100
+        
+        # 시가총액 (조 단위로 변환)
+        mkt_cap = stock.info.get('marketCap', 0) / 1_000_000_000_000 # 조($) 단위
+        
+        return {
+            "price": round(current_price, 2),
+            "pct": round(change_pct, 2),
+            "cap": round(mkt_cap, 2)
+        }
+    except:
+        return {"price": "-", "pct": "-", "cap": "-"}
+
+def fetch_filtered_news(brand, exclude_words):
+    """불필요한 키워드를 제외하고 뉴스를 검색합니다."""
     query = f"{brand} 주식"
-    # 구글 뉴스 RSS URL (한국어 설정)
+    if exclude_words:
+        # 제외할 단어 앞에 -를 붙여 검색 엔진에 전달합니다.
+        for word in exclude_words.split():
+            query += f" -{word}"
+            
     encoded_query = urllib.parse.quote(query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
     
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-    
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, timeout=10)
         soup = BeautifulSoup(response.content, "xml")
-        items = soup.find_all("item")[:3] # 상위 3개 추출
-        
-        news_list = []
-        for item in items:
-            title = item.title.text
-            # 구글 뉴스 링크는 정제가 필요할 수 있지만 RSS 링크는 바로 사용 가능합니다.
-            link = item.link.text
-            news_list.append({"title": title, "link": link})
-        return news_list
-    except Exception as e:
-        print(f"❌ {brand} 크롤링 실패: {e}")
+        items = soup.find_all("item")[:3]
+        return [{"title": i.title.text, "link": i.link.text} for i in items]
+    except:
         return []
 
 if __name__ == "__main__":
-    print("🚀 형님! 무적의 16개 종목 크롤링을 시작합니다!!")
+    print("🚀 형님! 고도화된 16개 종목 데이터 분석을 시작합니다!!")
     
-    # HTML 이메일 본문 시작
     html_body = f"""
     <html>
-    <body style="font-family: 'Malgun Gothic', sans-serif; line-height: 1.6; color: #333;">
-        <div style="max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
-            <h2 style="color: #2c3e50; border-bottom: 3px solid #e74c3c; padding-bottom: 10px;">🔥 오늘의 필승 종목 뉴스 (16선)</h2>
-            <p style="font-size: 14px; color: #666;">제목을 클릭하면 해당 뉴스 페이지로 즉시 이동합니다.</p>
+    <body style="font-family: 'Malgun Gothic', sans-serif; color: #333;">
+        <div style="max-width: 650px; margin: auto; padding: 20px; border: 1px solid #eee;">
+            <h2 style="color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px;">📈 월스트리트 오늘의 지표 & 뉴스</h2>
+            <p style="font-size: 13px; color: #7f8c8d;">기준일: {datetime.now().strftime('%Y-%m-%d')}</p>
     """
 
-    for brand in BRANDS:
-        print(f"🔍 {brand} 뉴스 수집 중...")
-        news_data = fetch_google_news(brand)
+    for brand, info in STOCK_MAP.items():
+        print(f"📊 {brand} 데이터 및 뉴스 수집 중...")
+        data = get_stock_data(info['ticker'])
+        news_data = fetch_filtered_news(brand, info['exclude'])
+        
+        # 등락률에 따른 색상 결정
+        color = "#e74c3c" if str(data['pct']) != "-" and data['pct'] > 0 else "#2980b9"
         
         html_body += f"""
-        <div style="margin-top: 20px; padding: 10px; background-color: #f9f9f9; border-radius: 5px;">
-            <strong style="font-size: 17px; color: #2980b9;">📍 {brand}</strong>
-            <ul style="margin-top: 10px; padding-left: 20px;">
+        <div style="margin-top: 25px; padding: 15px; border-radius: 8px; background-color: #f8f9fa;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #ccc; padding-bottom: 8px; margin-bottom: 10px;">
+                <strong style="font-size: 18px;">{brand} <span style="font-size: 13px; color: #888;">({info['ticker']})</span></strong>
+                <span style="color: {color}; font-weight: bold; font-size: 16px;">
+                    ${data['price']} ({data['pct']}%)
+                </span>
+            </div>
+            <div style="font-size: 12px; color: #666; margin-bottom: 10px;">시가총액: 약 {data['cap']}조 달러</div>
+            <ul style="margin: 0; padding-left: 18px; font-size: 14px;">
         """
         
-        if not news_data:
-            html_body += "<li>최근 소식이 없습니다.</li>"
-        else:
-            for news in news_data:
-                # 🔗 하이퍼링크 적용: 제목에 링크를 걸어 깔끔하게 만듭니다.
-                html_body += f"""
-                <li style="margin-bottom: 8px;">
-                    <a href="{news['link']}" style="text-decoration: none; color: #34495e; font-weight: bold;">
-                        {news['title']}
-                    </a>
-                </li>
-                """
+        for news in news_data:
+            html_body += f"<li style='margin-bottom: 6px;'><a href='{news['link']}' style='text-decoration: none; color: #34495e;'>{news['title']}</a></li>"
         
         html_body += "</ul></div>"
-        time.sleep(1) # 차단 방지를 위한 짧은 휴식
+        time.sleep(1)
 
-    html_body += """
-            <p style="margin-top: 30px; font-size: 12px; color: #999; text-align: center;">
-                형님! 오늘도 성투하십시오! 본 리포트는 실시간 크롤링으로 제작되었습니다.
-            </p>
-        </div>
-    </body>
-    </html>
-    """
+    html_body += "</div></body></html>"
 
-    # 메일 발송 로직
     msg = MIMEMultipart("alternative")
-    msg['Subject'] = f"[{datetime.now().strftime('%m월 %d일')}] 형님! 요청하신 16대 우량주 뉴스 리포트입니다!"
+    msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 형님! 16대 우량주 지표 및 필터링 뉴스입니다!"
     msg['From'], msg['To'] = EMAIL_ADDRESS, EMAIL_ADDRESS
     msg.attach(MIMEText(html_body, "html"))
 
@@ -108,6 +117,6 @@ if __name__ == "__main__":
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
             s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             s.send_message(msg)
-        print("✅ 형님! 깔끔하게 메일 쏴드렸습니다!!")
+        print("✅ 리포트 발송 완료!")
     except Exception as e:
-        print(f"❌ 발송 실패: {e}")
+        print(f"❌ 실패: {e}")
