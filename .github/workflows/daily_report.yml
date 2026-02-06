@@ -1,34 +1,29 @@
-name: Daily Stock News Report
+name: Daily Stock News Crawling
 
 on:
   schedule:
-    # ⚠️ UTC 기준입니다! 한국 시간(KST) 06:23은 UTC 21:23입니다.
-    # 분 시 일 월 요일 순서입니다.
-    - cron: '23 21 * * *'
-  workflow_dispatch: # 이건 형님이 버튼 눌러서 바로 실행해보고 싶을 때 쓰는 메뉴입니다!
+    - cron: '23 21 * * *' # 매일 아침 06:23 (KST)
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest # 최신 우분투 환경에서 실행합니다.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3 # 형님의 코드를 가상 서버로 가져옵니다.
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11' # 파이썬 3.11 버전을 설치합니다.
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
-          pip install gspread newsapi-python deep-translator
-          # 필요한 라이브러리를 설치하는 과정입니다.
+          # 🚀 크롤링을 위한 최소한의 도구만 설치합니다.
+          pip install requests beautifulsoup4 lxml
 
       - name: Run Script
-        env: # 🔐 Secrets에 저장한 비번들을 환경 변수로 넘겨줍니다!
-          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        env:
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          SERVICE_ACCOUNT_JSON: ${{ secrets.SERVICE_ACCOUNT_JSON }}
-        run: python stock_news_automation.py
+        run: python main.py
