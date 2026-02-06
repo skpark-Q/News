@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           # 🚀 크롤링을 위한 최소한의 도구만 설치합니다.
-          pip install requests beautifulsoup4 lxml
+          pip install gspread newsapi-python deep-translator yfinance beautifulsoup4 lxml requests
 
       - name: Run Script
         env:
