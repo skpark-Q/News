@@ -1,49 +1,49 @@
 import os, smtplib, time, urllib.parse, requests
-import yfinance as yf # 🔥 주가 데이터용
+import yfinance as yf
 from bs4 import BeautifulSoup
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
-# [환경 변수]
+# [환경 변수 설정]
 EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-# 🔥 [형님 설정] 종목명, 티커, 제외 키워드 매핑
+# 🔥 [형님 맞춤] 노이즈 제로! 정밀 필터링 맵
 STOCK_MAP = {
-    "애플": {"ticker": "AAPL", "exclude": ""},
+    "애플": {"ticker": "AAPL", "exclude": "사과 레시피 다이어트 과일"},
     "마이크로소프트": {"ticker": "MSFT", "exclude": ""},
     "엔비디아": {"ticker": "NVDA", "exclude": ""},
-    "알파벳": {"ticker": "GOOGL", "exclude": "유튜브"}, # 예: 유튜브 제외 원하시면 추가
-    "아마존": {"ticker": "AMZN", "exclude": "밀림"},
-    "메타": {"ticker": "META", "exclude": "메타버스 meta-verse"}, # 🔥 메타버스 제외
-    "테슬라": {"ticker": "TSLA", "exclude": ""},
+    "알파벳": {"ticker": "GOOGL", "exclude": "영어 교육 학습 유치원"},
+    "아마존": {"ticker": "AMZN", "exclude": "정글 열대우림 브라질"},
+    "메타": {"ticker": "META", "exclude": "메타버스 meta-verse 가상현실"},
+    "테슬라": {"ticker": "TSLA", "exclude": "니콜라 발명가"},
     "브로드컴": {"ticker": "AVGO", "exclude": ""},
     "일라이 릴리": {"ticker": "LLY", "exclude": ""},
-    "비자": {"ticker": "V", "exclude": "입국 비자"}, # 🔥 비자 거절 등 뉴스 제외
-    "존슨앤존슨": {"ticker": "JNJ", "exclude": ""},
-    "오라클": {"ticker": "ORCL", "exclude": ""},
+    "비자": {"ticker": "V", "exclude": "입국 여권 발급 거절 신청 여행"}, # 가장 중요!
+    "존슨앤존슨": {"ticker": "JNJ", "exclude": "베이비파우더"}, # 소송 이슈 외 제품 리뷰 제외
+    "오라클": {"ticker": "ORCL", "exclude": "예언 점괘 게임"},
     "버크셔 해서웨이": {"ticker": "BRK-B", "exclude": ""},
-    "팔란티어": {"ticker": "PLTR", "exclude": ""},
-    "월마트": {"ticker": "WMT", "exclude": ""},
-    "코스트코": {"ticker": "COST", "exclude": ""}
+    "팔란티어": {"ticker": "PLTR", "exclude": "반지의제왕 판타지"},
+    "월마트": {"ticker": "WMT", "exclude": "사고 사건"},
+    "코스트코": {"ticker": "COST", "exclude": "레시피 요리"}
 }
 
 def get_stock_data(ticker):
-    """실시간 주가, 등락률, 시가총액 정보를 가져옵니다."""
+    """실시간 주가 및 주요 지표 수집"""
     try:
         stock = yf.Ticker(ticker)
-        info = stock.fast_info
-        # 현재가, 등락률 계산
-        current_price = info['last_price']
-        prev_close = info['previous_close']
+        # fast_info를 통해 속도 개선
+        fast = stock.fast_info
+        current_price = fast['last_price']
+        prev_close = fast['previous_close']
         change_pct = ((current_price - prev_close) / prev_close) * 100
         
-        # 시가총액 (조 단위로 변환)
-        mkt_cap = stock.info.get('marketCap', 0) / 1_000_000_000_000 # 조($) 단위
+        # 시가총액 (조 단위)
+        mkt_cap = stock.info.get('marketCap', 0) / 1_000_000_000_000
         
         return {
-            "price": round(current_price, 2),
+            "price": f"{current_price:,.2f}",
             "pct": round(change_pct, 2),
             "cap": round(mkt_cap, 2)
         }
@@ -51,18 +51,20 @@ def get_stock_data(ticker):
         return {"price": "-", "pct": "-", "cap": "-"}
 
 def fetch_filtered_news(brand, exclude_words):
-    """불필요한 키워드를 제외하고 뉴스를 검색합니다."""
+    """노이즈 단어를 -키워드로 제외하여 검색합니다."""
+    # "브랜드 주식"을 기본으로 하되, 제외 단어들 앞에 -를 붙여 구글 엔진에 전달
     query = f"{brand} 주식"
     if exclude_words:
-        # 제외할 단어 앞에 -를 붙여 검색 엔진에 전달합니다.
         for word in exclude_words.split():
             query += f" -{word}"
             
     encoded_query = urllib.parse.quote(query)
+    # 구글 뉴스 RSS (한국어/한국 지역 설정)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
     
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.content, "xml")
         items = soup.find_all("item")[:3]
         return [{"title": i.title.text, "link": i.link.text} for i in items]
@@ -70,46 +72,52 @@ def fetch_filtered_news(brand, exclude_words):
         return []
 
 if __name__ == "__main__":
-    print("🚀 형님! 고도화된 16개 종목 데이터 분석을 시작합니다!!")
+    print("🚀 작업을 시작합니다, 형님!! (노이즈 필터링 강화 버전)")
     
     html_body = f"""
     <html>
-    <body style="font-family: 'Malgun Gothic', sans-serif; color: #333;">
-        <div style="max-width: 650px; margin: auto; padding: 20px; border: 1px solid #eee;">
-            <h2 style="color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px;">📈 월스트리트 오늘의 지표 & 뉴스</h2>
-            <p style="font-size: 13px; color: #7f8c8d;">기준일: {datetime.now().strftime('%Y-%m-%d')}</p>
+    <body style="font-family: 'Malgun Gothic', sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 650px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 12px;">
+            <h2 style="color: #2c3e50; border-bottom: 3px solid #e74c3c; padding-bottom: 10px;">📉 월스트리트 16대 우량주 리포트</h2>
+            <p style="font-size: 13px; color: #888; text-align: right;">발행일시: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
     """
 
     for brand, info in STOCK_MAP.items():
-        print(f"📊 {brand} 데이터 및 뉴스 수집 중...")
+        print(f"📊 {brand} 진행 중...")
         data = get_stock_data(info['ticker'])
         news_data = fetch_filtered_news(brand, info['exclude'])
         
-        # 등락률에 따른 색상 결정
-        color = "#e74c3c" if str(data['pct']) != "-" and data['pct'] > 0 else "#2980b9"
-        
+        # 등락률 색상 (상승 빨강, 하락 파랑)
+        pct_val = data['pct']
+        pct_color = "#e74c3c" if pct_val != "-" and pct_val > 0 else "#2980b9"
+        pct_sign = "+" if pct_val != "-" and pct_val > 0 else ""
+
         html_body += f"""
-        <div style="margin-top: 25px; padding: 15px; border-radius: 8px; background-color: #f8f9fa;">
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed #ccc; padding-bottom: 8px; margin-bottom: 10px;">
-                <strong style="font-size: 18px;">{brand} <span style="font-size: 13px; color: #888;">({info['ticker']})</span></strong>
-                <span style="color: {color}; font-weight: bold; font-size: 16px;">
-                    ${data['price']} ({data['pct']}%)
+        <div style="margin-top: 20px; padding: 15px; border-radius: 8px; background-color: #f8f9fa; border: 1px solid #eee;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <span style="font-size: 18px; font-weight: bold; color: #34495e;">{brand} <small style="color:#999;">({info['ticker']})</small></span>
+                <span style="font-size: 17px; font-weight: bold; color: {pct_color};">
+                    ${data['price']} ({pct_sign}{pct_val}%)
                 </span>
             </div>
-            <div style="font-size: 12px; color: #666; margin-bottom: 10px;">시가총액: 약 {data['cap']}조 달러</div>
-            <ul style="margin: 0; padding-left: 18px; font-size: 14px;">
+            <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 10px;">시가총액: 약 {data['cap']}조 달러</div>
+            <ul style="margin: 0; padding-left: 20px; font-size: 14px; border-top: 1px solid #eee; padding-top: 10px;">
         """
         
-        for news in news_data:
-            html_body += f"<li style='margin-bottom: 6px;'><a href='{news['link']}' style='text-decoration: none; color: #34495e;'>{news['title']}</a></li>"
+        if not news_data:
+            html_body += "<li style='color:#bbb;'>관련 뉴스가 없습니다.</li>"
+        else:
+            for news in news_data:
+                html_body += f"<li style='margin-bottom: 6px;'><a href='{news['link']}' style='text-decoration: none; color: #34495e;'>{news['title']}</a></li>"
         
         html_body += "</ul></div>"
-        time.sleep(1)
+        time.sleep(1) # 차단 방지
 
     html_body += "</div></body></html>"
 
+    # 메일 발송
     msg = MIMEMultipart("alternative")
-    msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 형님! 16대 우량주 지표 및 필터링 뉴스입니다!"
+    msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 형님! 노이즈 제거된 16대 주식 리포트입니다!"
     msg['From'], msg['To'] = EMAIL_ADDRESS, EMAIL_ADDRESS
     msg.attach(MIMEText(html_body, "html"))
 
@@ -117,6 +125,6 @@ if __name__ == "__main__":
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
             s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             s.send_message(msg)
-        print("✅ 리포트 발송 완료!")
+        print("✅ 리포트 발송 성공!")
     except Exception as e:
-        print(f"❌ 실패: {e}")
+        print(f"❌ 발송 실패: {e}")
