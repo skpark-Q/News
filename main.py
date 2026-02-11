@@ -37,7 +37,7 @@ def get_market_summary():
     except: return "데이터 로딩 중..."
 
 def get_stock_details(ticker):
-    """지표별 정밀 색상 판단 및 데이터 수집"""
+    """지표별 정밀 색상 판단 및 데이터 수집 (한글 투자의견 적용)"""
     try:
         s = yf.Ticker(ticker)
         f, info = s.fast_info, s.info
@@ -53,19 +53,29 @@ def get_stock_details(ticker):
         per = info.get('trailingPE', 0)
         p_color = "#1a73e8" if (isinstance(per, (int, float)) and per < 25) else ("#d93025" if (isinstance(per, (int, float)) and per > 40) else "#f9ab00")
         
-        # 3. 배당률 (오류 수정 로직)
+        # 3. 배당률 (계산 방식 고도화)
         div = info.get('dividendYield')
-        # yfinance 데이터가 간혹 %단위로 들어오는 경우를 대비해 0.1(10%) 초과 시 재계산
         if div is None: div_val = 0.0
-        elif div > 0.1: div_val = div # 이미 %로 들어온 경우
-        else: div_val = div * 100 # 소수로 들어온 경우
-        
+        elif div > 0.1: div_val = div  # 이미 % 단위인 경우
+        else: div_val = div * 100      # 소수점 단위인 경우
         d_color = "#1a73e8" if div_val >= 3 else ("#f9ab00" if div_val >= 1 else "#d93025")
         
-        # 4. 52주 저점 대비 위치 & 컬러
+        # 4. 52주 저점 대비 위치
         low_52w = f['year_low']
         dist_low = ((curr / low_52w) - 1) * 100
         l_color = "#1a73e8" if dist_low < 10 else ("#d93025" if dist_low > 30 else "#111")
+
+        # 5. [형님 요청] 투자의견 한글 매핑
+        opinion_key = info.get('recommendationKey', 'N/A').lower()
+        opinion_map = {
+            'strong_buy': '강력 매수',
+            'buy': '매수',
+            'hold': '보유(중립)',
+            'underperform': '수익률 하회',
+            'sell': '매도',
+            'strong_sell': '강력 매도'
+        }
+        kor_opinion = opinion_map.get(opinion_key, '의견 없음')
 
         flags = []
         if abs(pct) >= 3.5: flags.append("⚠️")
@@ -82,7 +92,7 @@ def get_stock_details(ticker):
             "per": f"{per:.1f}" if isinstance(per, (int, float)) else "-", "p_color": p_color,
             "div": f"{div_val:.2f}%", "d_color": d_color,
             "dist_low": f"{dist_low:+.1f}%", "l_color": l_color,
-            "opinion": info.get('recommendationKey', 'N/A').replace('_', ' ').upper(),
+            "opinion": kor_opinion,
             "cap": f"{info.get('marketCap', 0) / 1_000_000_000_000:,.1f}T"
         }
     except: return None
@@ -126,7 +136,6 @@ if __name__ == "__main__":
         if not d: continue
         news = fetch_korean_news(brand)
         
-        # [디자인] 주가 변동에 따른 헤더 음영 부활
         header_bg = "#fce8e6" if d['pct'] > 0 else "#e8f0fe"
         text_color = "#d93025" if d['pct'] > 0 else "#1a73e8"
 
@@ -151,8 +160,8 @@ if __name__ == "__main__":
                         <td style="padding: 5px 0;">• 배당률: <b style="color:{d['d_color']};">{d['div']}</b></td>
                     </tr>
                     <tr>
-                        <td style="padding: 5px 0;">• 의견: <b style="color:#111;">{d['opinion']}</b></td>
-                        <td style="padding: 5px 0;">• 시총: <b>{d['cap']}</b></td>
+                        <td style="padding: 5px 0;">• 투자의견: <b style="color:#111;">{d['opinion']}</b></td>
+                        <td style="padding: 5px 0;">• 시가총액: <b>{d['cap']}</b></td>
                     </tr>
                 </table>
                 <ul style="margin: 0; padding-left: 18px; border-top: 1px solid #f5f5f5; padding-top: 10px;">{news}</ul>
@@ -164,10 +173,10 @@ if __name__ == "__main__":
     html += "</div></body></html>"
 
     msg = MIMEMultipart("alternative")
-    msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 🏛️ 형님! 판단 지표 완벽 정립된 VIP 리포트입니다."
+    msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 🏛️ 형님! 완벽 한글화된 주식 전략 리포트 배달왔습니다!"
     msg['From'], msg['To'] = EMAIL_ADDRESS, EMAIL_ADDRESS
     msg.attach(MIMEText(html, "html"))
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
         s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
         s.send_message(msg)
-    print("✅ 발송 완료!")
+    print("✅ 형님! 성공적으로 발송 완료했습니다!!")
