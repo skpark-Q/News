@@ -5,11 +5,18 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
-# [환경 변수]
+# [환경 변수 및 수신인 설정]
 EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
-# 형님의 무적 16대 종목 리스트
+# 🔥 형님! 여기에 수신인 메일을 모두 담았습니다!
+RECIPIENTS = [
+    EMAIL_ADDRESS,           # 형님 본인
+    "yhkwon@spigen.com",     # 파트너 1
+    "jynoh@spigen.com"       # 파트너 2
+]
+
+# 16대 우량주 리스트
 STOCK_MAP = {
     "애플": "AAPL", "마이크로소프트": "MSFT", "엔비디아": "NVDA", "알파벳": "GOOGL",
     "아마존": "AMZN", "메타": "META", "테슬라": "TSLA", "브로드컴": "AVGO",
@@ -38,34 +45,29 @@ def get_market_summary():
     except: return "시장 데이터 로딩 중..."
 
 def get_stock_details(ticker):
-    """주가, 체력, 한글 투자의견 등 데이터 정밀 수집"""
+    """주가, 체력, 한글 투자의견 데이터 수집"""
     try:
         s = yf.Ticker(ticker)
         f, info = s.fast_info, s.info
         curr, prev = f['last_price'], f['previous_close']
         pct = ((curr - prev) / prev) * 100
         
-        # 1. 상승여력 (Upside) & 컬러
         target = info.get('targetMeanPrice', 0)
         upside_val = ((target / curr) - 1) * 100 if target > 0 else 0
         u_color = "#1a73e8" if upside_val > 15 else ("#d93025" if upside_val < 0 else "#111")
         
-        # 2. PER & 컬러
         per = info.get('trailingPE', 0)
         p_color = "#1a73e8" if (isinstance(per, (int, float)) and per < 25) else ("#d93025" if (isinstance(per, (int, float)) and per > 40) else "#f9ab00")
         
-        # 3. 배당률 (계산 오류 수정 버전)
         div = info.get('dividendYield')
         if div is None: div_val = 0.0
-        elif div > 0.1: div_val = div  # 이미 % 단위일 경우
-        else: div_val = div * 100      # 소수점 단위일 경우
+        elif div > 0.1: div_val = div
+        else: div_val = div * 100
         d_color = "#1a73e8" if div_val >= 3 else ("#f9ab00" if div_val >= 1 else "#d93025")
         
-        # 4. 52주 저점 대비 & 컬러
         dist_low = ((curr / f['year_low']) - 1) * 100
         l_color = "#1a73e8" if dist_low < 10 else ("#d93025" if dist_low > 30 else "#111")
         
-        # 5. 투자의견 한글화
         opinion_map = {
             'strong_buy': '강력 매수', 'buy': '매수', 
             'hold': '보유(중립)', 'underperform': '수익률 하회', 
@@ -93,7 +95,7 @@ def get_stock_details(ticker):
     except: return None
 
 def fetch_korean_news(brand):
-    """무조건 오늘자(when:1d) 마감 소식만 가져옵니다!"""
+    """당일 마감 소식 수집 (when:1d)"""
     query = urllib.parse.quote(f"{brand} 주식 (마감 OR 종가 OR 속보) when:1d")
     url = f"https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko"
     try:
@@ -105,7 +107,6 @@ def fetch_korean_news(brand):
                 links.append(f"<li style='margin-bottom:5px;'><a href='{i.link.text}' style='color:#111; text-decoration:none; font-size:13px;'>• {i.title.text}</a></li>")
             if len(links) >= 3: break
         
-        # 오늘 뉴스가 너무 없으면 분석 뉴스로 확장
         if not links:
             q_fallback = urllib.parse.quote(f"{brand} 주식 분석 when:1d")
             url_f = f"https://news.google.com/rss/search?q={q_fallback}&hl=ko&gl=KR&ceid=KR:ko"
@@ -162,11 +163,19 @@ if __name__ == "__main__":
         time.sleep(0.5)
 
     html += "</div></body></html>"
+    
+    # [발송 로직] 다중 수신인 대응
     msg = MIMEMultipart("alternative")
     msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 🏛️ 형님! 전략 리포트 배달왔습니다!"
-    msg['From'], msg['To'] = EMAIL_ADDRESS, EMAIL_ADDRESS
+    msg['From'] = EMAIL_ADDRESS
+    msg['To'] = ", ".join(RECIPIENTS)  # 수신인 명단 표시
     msg.attach(MIMEText(html, "html"))
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
-        s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        s.send_message(msg)
-    print("✅ 발송 완료!")
+    
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
+            s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            # send_message는 msg 객체의 To 헤더를 자동으로 읽어 발송합니다.
+            s.send_message(msg)
+        print(f"✅ 총 {len(RECIPIENTS)}명에게 리포트 발송 완료!")
+    except Exception as e:
+        print(f"❌ 발송 실패: {e}")
