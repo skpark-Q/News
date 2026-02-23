@@ -4,7 +4,7 @@ on:
   schedule:
     # 한국 시간(KST) 오전 09:36 실행 (UTC 00:36)
     - cron: '36 0 * * *'
-  workflow_dispatch: # 필요할 때 언제든 수동 실행 가능!
+  workflow_dispatch: # 수동 실행 버튼
 
 jobs:
   build:
@@ -20,7 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # 🚀 필요한 모든 부품을 설치합니다.
+          # 🚀 필요한 부품들을 최신으로 설치합니다!
           pip install yfinance beautifulsoup4 lxml requests
 
       - name: Run Script
