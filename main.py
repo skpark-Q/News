@@ -119,13 +119,33 @@ def fetch_korean_news(brand):
         return "".join(links)
     except: return "<li>오늘의 분석 뉴스를 불러오지 못했습니다.</li>"
 
+def fetch_general_headlines():
+    """사회/경제 분야 오늘자 헤드라인 7개 수집 (when:1d)"""
+    # '사회'와 '경제' 키워드로 오늘자 속보 기사를 7개 가져옵니다.
+    query = urllib.parse.quote("사회 경제 속보 when:1d")
+    url = f"https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko"
+    try:
+        res = requests.get(url, timeout=5)
+        soup = BeautifulSoup(res.content, "xml")
+        links = []
+        for i in soup.find_all("item"):
+            title = i.title.text
+            if bool(re.search('[가-힣]', title)):
+                links.append(f"<li style='margin-bottom:6px;'><a href='{i.link.text}' style='color:#111; text-decoration:none; font-size:13px;'>• {title}</a></li>")
+            if len(links) >= 7: break
+        return "".join(links)
+    except: return "<li>헤드라인 뉴스를 불러오지 못했습니다.</li>"
+
 if __name__ == "__main__":
     m_context = get_market_summary()
+    headlines_html = fetch_general_headlines()
+    
     html = f"""
     <html>
     <body style="font-family: 'Malgun Gothic', sans-serif; background-color: #ffffff; padding: 20px;">
         <div style="max-width: 650px; margin: auto; border: 2px solid #111; padding: 25px; border-radius: 10px;">
             <h1 style="border-bottom: 4px solid #111; padding-bottom: 10px; margin: 0; text-align: center;">🏛️ VIP 주식 전략 리포트</h1>
+            
             <div style="background: #f8f9fa; border: 1px solid #ddd; padding: 15px; margin-top: 20px; font-size: 12px; line-height: 1.6;">
                 <b style="font-size: 14px; color: #111;">[📊 투자 지표 컬러 가이드]</b><br>
                 • <b>상승여력:</b> 전문가 목표가 대비 <span style="color:#1a73e8;">15%↑(🔵기회)</span> / <span style="color:#d93025;">마이너스(🔴위험)</span><br>
@@ -133,6 +153,12 @@ if __name__ == "__main__":
                 • <b>PER:</b> <span style="color:#1a73e8;">25미만(🔵저평가)</span> / <span style="color:#d93025;">40초과(🔴고평가)</span><br>
                 • <b>배당률:</b> <span style="color:#1a73e8;">3%↑(🔵혜자)</span> / <span style="color:#d93025;">1%미만(🔴낮음)</span>
             </div>
+
+            <div style="margin-top: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px;">
+                <b style="font-size: 15px; color: #111;">📰 사회/경제 주요 헤드라인 (7)</b>
+                <ul style="margin: 10px 0 0 0; padding-left: 18px;">{headlines_html}</ul>
+            </div>
+
             <p style="padding: 12px; background: #111; color:#fff; font-size: 14px; margin-top: 15px;"><b>🌍 오늘의 전장 상황:</b> {m_context}</p>
     """
 
@@ -170,13 +196,12 @@ if __name__ == "__main__":
     msg = MIMEMultipart("alternative")
     msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 🏛️ 형님! 전략 리포트 배달왔습니다!"
     msg['From'] = EMAIL_ADDRESS
-    msg['To'] = ", ".join(RECIPIENTS)  # 수신인 명단 표시
+    msg['To'] = ", ".join(RECIPIENTS)
     msg.attach(MIMEText(html, "html"))
     
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
             s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-            # send_message는 msg 객체의 To 헤더를 자동으로 읽어 발송합니다.
             s.send_message(msg)
         print(f"✅ 총 {len(RECIPIENTS)}명에게 리포트 발송 완료!")
     except Exception as e:
