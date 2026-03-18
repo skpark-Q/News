@@ -120,21 +120,41 @@ def fetch_korean_news(brand):
     except: return "<li>오늘의 분석 뉴스를 불러오지 못했습니다.</li>"
 
 def fetch_general_headlines():
-    """사회/경제 분야 오늘자 헤드라인 7개 수집 (when:1d)"""
-    # '사회'와 '경제' 키워드로 오늘자 속보 기사를 7개 가져옵니다.
-    query = urllib.parse.quote("사회 경제 속보 when:1d")
-    url = f"https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko"
-    try:
-        res = requests.get(url, timeout=5)
-        soup = BeautifulSoup(res.content, "xml")
-        links = []
-        for i in soup.find_all("item"):
-            title = i.title.text
-            if bool(re.search('[가-힣]', title)):
-                links.append(f"<li style='margin-bottom:6px;'><a href='{i.link.text}' style='color:#111; text-decoration:none; font-size:13px;'>• {title}</a></li>")
-            if len(links) >= 7: break
-        return "".join(links)
-    except: return "<li>헤드라인 뉴스를 불러오지 못했습니다.</li>"
+    """
+    🔥 [정밀 필터링] 사회와 경제 뉴스를 각각 수집하여 중복 없이 섞어 7개를 만듭니다.
+    """
+    def get_news_from_query(sub_query, count):
+        q = urllib.parse.quote(f"{sub_query} when:1d")
+        u = f"https://news.google.com/rss/search?q={q}&hl=ko&gl=KR&ceid=KR:ko"
+        found = []
+        try:
+            r = requests.get(u, timeout=5)
+            s = BeautifulSoup(r.content, "xml")
+            for item in s.find_all("item"):
+                title = item.title.text
+                if bool(re.search('[가-힣]', title)):
+                    found.append({"title": title, "link": item.link.text})
+                if len(found) >= count: break
+        except: pass
+        return found
+
+    # 1. 사회 4개, 경제 3개를 각각 가져옵니다.
+    society_news = get_news_from_query("사회 속보", 4)
+    economy_news = get_news_from_query("경제 속보", 4) # 혹시 모를 중복을 대비해 넉넉히 수집
+
+    # 2. 중복 제거 및 믹스
+    combined = []
+    seen_titles = set()
+
+    for item in (society_news + economy_news):
+        # 제목 앞뒤 공백 제거 및 중복 체크
+        clean_title = item['title'].strip()
+        if clean_title not in seen_titles:
+            combined.append(f"<li style='margin-bottom:6px;'><a href='{item['link']}' style='color:#111; text-decoration:none; font-size:13px;'>• {clean_title}</a></li>")
+            seen_titles.add(clean_title)
+        if len(combined) >= 7: break
+
+    return "".join(combined)
 
 if __name__ == "__main__":
     m_context = get_market_summary()
@@ -192,7 +212,6 @@ if __name__ == "__main__":
 
     html += "</div></body></html>"
     
-    # [발송 로직] 다중 수신인 대응
     msg = MIMEMultipart("alternative")
     msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 🏛️ 형님! 전략 리포트 배달왔습니다!"
     msg['From'] = EMAIL_ADDRESS
@@ -203,6 +222,6 @@ if __name__ == "__main__":
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
             s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             s.send_message(msg)
-        print(f"✅ 총 {len(RECIPIENTS)}명에게 리포트 발송 완료!")
+        print(f"✅ 사회/경제 정밀 믹스 및 중복 제거 완료! 총 {len(RECIPIENTS)}명 발송.")
     except Exception as e:
         print(f"❌ 발송 실패: {e}")
