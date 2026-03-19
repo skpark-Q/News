@@ -2,7 +2,7 @@
 ================================================================================
 [ 🏛️ VIP 주식 전략 리포트 - 통합 설계 변경 이력 (Design Change History) ]
 ================================================================================
-최종 수정일: 2026-03-18 | 현재 버전: v3.1
+최종 수정일: 2026-03-19 | 현재 버전: v3.2
 --------------------------------------------------------------------------------
 날짜        | 버전         | 설계 변경 및 업데이트 내역
 --------------------------------------------------------------------------------
@@ -15,6 +15,7 @@
 2026-03-05 | v2.2         | 다중 수신인 발송 및 평일(월~금) 스케줄링 워크플로우 적용
 2026-03-17 | v3.0         | when:1d 최신성 필터 및 사회/경제 헤드라인 섹션 추가
 2026-03-18 | v3.1         | 헤드라인 중복 제거 및 사회/경제(4:3) 정밀 믹싱 로직 적용
+2026-03-19 | v3.2         | [최신] 헤드라인 중복 필터 고도화 및 '[속보]' 등 불필요 태그 제거 로직 적용
 ================================================================================
 """
 
@@ -26,7 +27,6 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
 # [1. 환경 변수 및 수신인 설정] --------------------------------------------------
-# 2026-03-05 v2.2: 다중 수신인 대응을 위해 리스트 구조 도입
 EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD')
 
@@ -39,7 +39,6 @@ RECIPIENTS = [
 ]
 
 # [2. 분석 대상 종목 데이터베이스] ------------------------------------------------
-# 2026-02-12 v1.2: 16대 우량주 딕셔너리 구성
 STOCK_MAP = {
     "애플": "AAPL", "마이크로소프트": "MSFT", "엔비디아": "NVDA", "알파벳": "GOOGL",
     "아마존": "AMZN", "메타": "META", "테슬라": "TSLA", "브로드컴": "AVGO",
@@ -48,10 +47,7 @@ STOCK_MAP = {
 }
 
 def get_market_summary():
-    """
-    [2026-03-18 v1.3, v2.0]: 상단 지수 정보 및 컬러 지표 산출
-    나스닥, S&P500의 등락률과 VIX 지수의 안정성을 판단합니다.
-    """
+    """상단 시장 지수 정보 수집 (v1.3, v2.0)"""
     try:
         results = []
         indices = {"나스닥": "^IXIC", "S&P500": "^GSPC", "공포지수(VIX)": "^VIX"}
@@ -60,59 +56,35 @@ def get_market_summary():
             f = s.fast_info
             curr = f['last_price']
             pct = ((curr - f['previous_close']) / f['previous_close']) * 100
-            
             color = "#111"
             if name == "공포지수(VIX)":
-                # VIX 수치에 따른 심리 상태 색상 구분
                 color = "#1a73e8" if curr < 20 else ("#f9ab00" if curr < 30 else "#d93025")
                 results.append(f"{name}: <b style='color:{color};'>{curr:.2f}</b>")
             else:
-                # 지수 등락에 따른 색상 구분
                 idx_color = "#d93025" if pct > 0 else "#1a73e8"
                 results.append(f"{name}: <b style='color:{idx_color};'>{pct:+.2f}%</b>")
         return " | ".join(results)
     except: return "시장 데이터 로딩 중..."
 
 def get_stock_details(ticker):
-    """
-    [2026-03-18 v2.0, v2.1]: 개별 종목 재무 지표 및 투자의견 한글화
-    PER, 배당률(오류 수정 로직 포함), 목표주가 여력 및 깃발 시스템을 처리합니다.
-    """
+    """개별 종목 재무 지표 및 투자의견 산출 (v2.0, v2.1)"""
     try:
         s = yf.Ticker(ticker)
         f, info = s.fast_info, s.info
         curr, prev = f['last_price'], f['previous_close']
         pct = ((curr - prev) / prev) * 100
-        
-        # 상승여력 산출 및 색상 지정
         target = info.get('targetMeanPrice', 0)
         upside_val = ((target / curr) - 1) * 100 if target > 0 else 0
         u_color = "#1a73e8" if upside_val > 15 else ("#d93025" if upside_val < 0 else "#111")
-        
-        # PER 산출 및 색상 지정
         per = info.get('trailingPE', 0)
         p_color = "#1a73e8" if (isinstance(per, (int, float)) and per < 25) else ("#d93025" if (isinstance(per, (int, float)) and per > 40) else "#f9ab00")
-        
-        # 배당률 산출 (2026-02-20 v2.1: 뻥튀기 방지를 위한 데이터 단위 보정 로직 적용)
         div = info.get('dividendYield')
-        if div is None: div_val = 0.0
-        elif div > 0.1: div_val = div
-        else: div_val = div * 100
+        div_val = (div * 100 if div and div < 1 else (div or 0))
         d_color = "#1a73e8" if div_val >= 3 else ("#f9ab00" if div_val >= 1 else "#d93025")
-        
-        # 52주 저점 대비 거리 산출
         dist_low = ((curr / f['year_low']) - 1) * 100
         l_color = "#1a73e8" if dist_low < 10 else ("#d93025" if dist_low > 30 else "#111")
-        
-        # 투자의견 한글 매핑 (2026-02-20 v1.0, v2.1)
-        opinion_map = {
-            'strong_buy': '강력 매수', 'buy': '매수', 
-            'hold': '보유(중립)', 'underperform': '수익률 하회', 
-            'sell': '매도', 'strong_sell': '강력 매도'
-        }
+        opinion_map = {'strong_buy': '강력 매수', 'buy': '매수', 'hold': '보유(중립)', 'underperform': '수익률 하회', 'sell': '매도'}
         kor_opinion = opinion_map.get(info.get('recommendationKey', '').lower(), '의견 없음')
-
-        # 깃발 시스템 (2026-02-13 v1.3): 실적, 변동성, 신고가 감지
         flags = []
         if abs(pct) >= 3.5: flags.append("⚠️")
         if curr >= (f['year_high'] * 0.98): flags.append("✨")
@@ -120,7 +92,6 @@ def get_stock_details(ticker):
             if not s.calendar.empty:
                 if 0 <= (s.calendar.iloc[0, 0] - datetime.now().date()).days <= 7: flags.append("🚩")
         except: pass
-
         return {
             "price": f"{curr:,.2f}", "pct": round(pct, 2), "flags": "".join(flags),
             "upside": f"{upside_val:+.1f}%", "u_color": u_color,
@@ -133,10 +104,7 @@ def get_stock_details(ticker):
     except: return None
 
 def fetch_korean_news(brand):
-    """
-    [2026-03-18 v1.1, v3.0]: 종목별 오늘자 최신 뉴스 수집
-    when:1d 필터를 사용하여 24시간 이내의 한국어 기사만 추출합니다.
-    """
+    """종목별 당일 핵심 뉴스 수집 (v1.1, v3.0)"""
     query = urllib.parse.quote(f"{brand} 주식 (마감 OR 종가 OR 속보) when:1d")
     url = f"https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko"
     try:
@@ -144,25 +112,19 @@ def fetch_korean_news(brand):
         soup = BeautifulSoup(res.content, "xml")
         links = []
         for i in soup.find_all("item"):
-            if bool(re.search('[가-힣]', i.title.text)):
-                links.append(f"<li style='margin-bottom:5px;'><a href='{i.link.text}' style='color:#111; text-decoration:none; font-size:13px;'>• {i.title.text}</a></li>")
+            title = i.title.text
+            if bool(re.search('[가-힣]', title)):
+                # 종목 뉴스에서도 [속보] 태그 제거 로직 적용 (v3.2)
+                clean_title = re.sub(r'\[속보\]|\[종합\]|\[.*?보\]|\[포토\]', '', title).strip()
+                links.append(f"<li style='margin-bottom:5px;'><a href='{i.link.text}' style='color:#111; text-decoration:none; font-size:13px;'>• {clean_title}</a></li>")
             if len(links) >= 3: break
-        
-        # 당일 마감 소식이 부족할 경우 분석용 기사로 확장 검색
-        if not links:
-            q_fallback = urllib.parse.quote(f"{brand} 주식 분석 when:1d")
-            url_f = f"https://news.google.com/rss/search?q={q_fallback}&hl=ko&gl=KR&ceid=KR:ko"
-            res_f = requests.get(url_f, timeout=5)
-            soup_f = BeautifulSoup(res_f.content, "xml")
-            for i in soup_f.find_all("item")[:3]:
-                links.append(f"<li style='margin-bottom:5px;'><a href='{i.link.text}' style='color:#111; text-decoration:none; font-size:13px;'>• {i.title.text}</a></li>")
         return "".join(links)
-    except: return "<li>오늘의 분석 뉴스를 불러오지 못했습니다.</li>"
+    except: return "<li>뉴스를 불러오지 못했습니다.</li>"
 
 def fetch_general_headlines():
     """
-    [2026-03-18 v3.0, v3.1]: 사회/경제 헤드라인 7선 수집
-    분야별 믹스(4:3)와 중복 제목 제거 로직이 탑재되어 있습니다.
+    사회 및 경제 헤드라인 수집 (v3.0, v3.1, v3.2)
+    [2026-03-19 v3.2]: '[속보]' 등 태그 제거 및 텍스트 유사도 기반 중복 제거 로직 강화
     """
     def get_news_from_query(sub_query, count):
         q = urllib.parse.quote(f"{sub_query} when:1d")
@@ -174,31 +136,35 @@ def fetch_general_headlines():
             for item in s.find_all("item"):
                 title = item.title.text
                 if bool(re.search('[가-힣]', title)):
-                    found.append({"title": title, "link": item.link.text})
+                    # [2026-03-19 v3.2] 불필요한 태그 제거 처리
+                    clean_t = re.sub(r'\[속보\]|\[종합\]|\[.*?보\]|\[포토\]', '', title).strip()
+                    found.append({"title": clean_t, "link": item.link.text})
                 if len(found) >= count: break
         except: pass
         return found
 
-    # 사회 4개, 경제 3개 구성을 위해 넉넉히 수집 시작
-    society_news = get_news_from_query("사회 속보", 5)
-    economy_news = get_news_from_query("경제 속보", 5)
+    # 사회 6개, 경제 6개 넉넉히 수집 (중복 제거 후 4:3 믹스를 위해)
+    society_news = get_news_from_query("사회 주요 뉴스", 6)
+    economy_news = get_news_from_query("경제 주요 뉴스", 6)
 
     combined = []
-    seen_titles = set()
+    seen_keywords = set() # 유사도 체크용 키워드 셋
 
-    # [2026-03-18 v3.1] 중복 기사 제거 및 사회/경제 데이터 믹싱 로직
     for item in (society_news + economy_news):
-        clean_title = item['title'].strip()
-        if clean_title not in seen_titles:
-            combined.append(f"<li style='margin-bottom:6px;'><a href='{item['link']}' style='color:#111; text-decoration:none; font-size:13px;'>• {clean_title}</a></li>")
-            seen_titles.add(clean_title)
+        title = item['title']
+        # [2026-03-19 v3.2] 제목의 앞 12글자를 추출하여 유사도 판단 (내용 중복 방지)
+        content_key = re.sub(r'[^가-힣0-9]', '', title)[:12]
+        
+        if content_key not in seen_keywords:
+            combined.append(f"<li style='margin-bottom:6px;'><a href='{item['link']}' style='color:#111; text-decoration:none; font-size:13px;'>• {title}</a></li>")
+            seen_keywords.add(content_key)
+        
         if len(combined) >= 7: break
 
     return "".join(combined)
 
 if __name__ == "__main__":
-    # [2026-03-18 v1.3, v2.2, v3.1]: 전체 조립 및 메일 구성 로직
-    print("🚀 VIP 주식 전략 리포트 생성 프로세스를 가동합니다...")
+    print("🚀 VIP 리포트 생성 중... (v3.2 헤드라인 정제 버전)")
     m_context = get_market_summary()
     headlines_html = fetch_general_headlines()
     
@@ -225,15 +191,11 @@ if __name__ == "__main__":
     """
 
     for brand, ticker in STOCK_MAP.items():
-        print(f"🔍 {brand}({ticker}) 분석 중...")
         d = get_stock_details(ticker)
         if not d: continue
         news = fetch_korean_news(brand)
-        
-        # 헤더 음영 로직 (2026-02-13 v1.3)
         header_bg = "#fce8e6" if d['pct'] > 0 else "#e8f0fe"
         text_color = "#d93025" if d['pct'] > 0 else "#1a73e8"
-
         html += f"""
         <div style="margin-top: 25px; border: 1px solid #eee; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
             <div style="background: {header_bg}; padding: 15px; display: flex; justify-content: space-between; align-items: center;">
@@ -256,19 +218,13 @@ if __name__ == "__main__":
         time.sleep(0.5)
 
     html += "</div></body></html>"
-    
-    # [이메일 객체 생성 및 다중 수신인 설정] ----------------------------------------
     msg = MIMEMultipart("alternative")
-    msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 🏛️ 형님! 설계 이력 관리되는 VIP 리포트 배달왔습니다!"
-    msg['From'] = EMAIL_ADDRESS
-    msg['To'] = ", ".join(RECIPIENTS)
+    msg['Subject'] = f"[{datetime.now().strftime('%m/%d')}] 🏛️ 형님! 헤드라인 정제 완료된 전략 리포트입니다!"
+    msg['From'], msg['To'] = EMAIL_ADDRESS, ", ".join(RECIPIENTS)
     msg.attach(MIMEText(html, "html"))
-    
-    # [SMTP 서버 접속 및 발송] ----------------------------------------------------
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
             s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             s.send_message(msg)
-        print(f"✅ 총 {len(RECIPIENTS)}명에게 리포트 발송 완료!")
-    except Exception as e:
-        print(f"❌ 발송 실패: {e}")
+        print(f"✅ 총 {len(RECIPIENTS)}명에게 발송 완료!")
+    except Exception as e: print(f"❌ 발송 실패: {e}")
