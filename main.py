@@ -2,7 +2,7 @@
 ================================================================================
 [ 🏛️ VIP 주식 전략 리포트 - 통합 설계 변경 이력 (Design Change History) ]
 ================================================================================
-최종 수정일: 2026-03-19 | 현재 버전: v4.0
+최종 수정일: 2026-03-20 | 현재 버전: v4.1
 --------------------------------------------------------------------------------
 날짜        | 버전         | 설계 변경 및 업데이트 내역
 --------------------------------------------------------------------------------
@@ -10,7 +10,8 @@
 2026-02-15 | v2.0~v2.2   | 지표 고도화(PER, 배당), 수신인 확장 및 스케줄링
 2026-03-17 | v3.0~v3.5   | 뉴스 믹싱, 중복 차단 필터 및 금지어 숙청 로직 강화
 2026-03-19 | v3.6~v3.8   | VIX 가이드 추가 및 국제 섹션 '미국 사회/정치' 타겟팅
-2026-03-19 | v4.0         | [최신] 프리미엄 카드 UI 디자인 및 실시간 펄스 도트 애니메이션 도입
+2026-03-19 | v4.0         | 프리미엄 카드 UI 디자인 및 실시간 펄스 도트 애니메이션 도입
+2026-03-20 | v4.1         | [최신] 지수 포맷 변경(현재가+변동률), 배당률 계산 수정 및 가이드 복구
 ================================================================================
 """
 
@@ -43,6 +44,10 @@ STOCK_MAP = {
 GLOBAL_SEEN_WORD_SETS = []
 
 def get_market_summary():
+    """
+    [2026-03-20 v4.1] 형님 요청: 지수 표기 방식 변경
+    포맷: 나스닥 16,000.00 (+1.50%)
+    """
     try:
         results = []
         indices = {"나스닥": "^IXIC", "S&P500": "^GSPC", "공포지수(VIX)": "^VIX"}
@@ -51,34 +56,50 @@ def get_market_summary():
             f = s.fast_info
             curr = f['last_price']
             pct = ((curr - f['previous_close']) / f['previous_close']) * 100
+            
             color = "#111"
             if name == "공포지수(VIX)":
                 color = "#1a73e8" if curr < 20 else ("#f9ab00" if curr < 30 else "#d93025")
                 results.append(f"{name}: <span style='color:{color}; font-weight:bold;'>{curr:.2f}</span>")
             else:
                 idx_color = "#d93025" if pct > 0 else "#1a73e8"
-                results.append(f"{name}: <span style='color:{idx_color}; font-weight:bold;'>{pct:+.2f}%</span>")
+                # 형님 요청 포맷: 지수(변동률)
+                results.append(f"{name}: <span style='color:{idx_color}; font-weight:bold;'>{curr:,.2f} ({pct:+.2f}%)</span>")
         return " &nbsp; | &nbsp; ".join(results)
     except: return "시장 데이터 로딩 중..."
 
 def get_stock_details(ticker):
+    """[2026-03-20 v4.1] 배당률 계산 로직 정밀 수정"""
     try:
         s = yf.Ticker(ticker)
         f, info = s.fast_info, s.info
         curr, prev = f['last_price'], f['previous_close']
         pct = ((curr - prev) / prev) * 100
+        
         target = info.get('targetMeanPrice', 0)
         upside_val = ((target / curr) - 1) * 100 if target > 0 else 0
         u_color = "#1a73e8" if upside_val > 15 else ("#d93025" if upside_val < 0 else "#111")
+        
         per = info.get('trailingPE', 0)
         p_color = "#1a73e8" if (isinstance(per, (int, float)) and per < 25) else ("#d93025" if (isinstance(per, (int, float)) and per > 40) else "#f9ab00")
+        
+        # 🔥 배당률 계산 수정: dividendYield가 0.015(1.5%)처럼 소수로 들어오는 것을 기본으로 함
         div = info.get('dividendYield')
-        div_val = (div * 100 if div and div < 1 else (div or 0))
+        if div is None or div == 0: 
+            div_val = 0.0
+        else:
+            # yfinance 특성상 1.0(100%)을 넘는 배당률은 우량주에서 불가능하므로, 
+            # 1보다 크면 이미 %단위로 들어온 것으로 판단하여 처리
+            div_val = div if div > 1 else div * 100
+            
         d_color = "#1a73e8" if div_val >= 3 else ("#f9ab00" if div_val >= 1 else "#d93025")
+        
         dist_low = ((curr / f['year_low']) - 1) * 100
         l_color = "#1a73e8" if dist_low < 10 else ("#d93025" if dist_low > 30 else "#111")
+        
         opinion_map = {'strong_buy': '강력 매수', 'buy': '매수', 'hold': '보유(중립)', 'underperform': '수익률 하회', 'sell': '매도'}
         kor_opinion = opinion_map.get(info.get('recommendationKey', '').lower(), '의견 없음')
+        
         flags = []
         if abs(pct) >= 3.5: flags.append("⚠️")
         if curr >= (f['year_high'] * 0.98): flags.append("✨")
@@ -86,6 +107,7 @@ def get_stock_details(ticker):
             if not s.calendar.empty:
                 if 0 <= (s.calendar.iloc[0, 0] - datetime.now().date()).days <= 7: flags.append("🚩")
         except: pass
+        
         return {
             "price": f"{curr:,.2f}", "pct": round(pct, 2), "flags": "".join(flags),
             "upside": f"{upside_val:+.1f}%", "u_color": u_color,
@@ -150,14 +172,12 @@ def fetch_categorized_headlines(queries_with_counts):
     return "".join(found_html[:7]) if found_html else "<li>주요 뉴스가 없습니다.</li>"
 
 if __name__ == "__main__":
-    print("🚀 VIP 리포트 v4.0 프리미엄 엔진 가동...")
+    print("🚀 VIP 리포트 v4.1 프리미엄 엔진 가동...")
     m_context = get_market_summary()
     domestic_html = fetch_categorized_headlines({"국내 주요 뉴스 경제 사회": 15})
     intl_html = fetch_categorized_headlines({"미국 사회 정치 뉴스 -코리아 -한국": 15})
-    
     mail_date = datetime.now().strftime('%m/%d')
     
-    # [프리미엄 HTML 템플릿]
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -188,6 +208,7 @@ if __name__ == "__main__":
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                         <span>• 공포지수: <span style="color:#1a73e8;">20↓안정</span> / <span style="color:#d93025;">30↑패닉</span></span>
                         <span>• 상승여력: <span style="color:#1a73e8;">15%↑기회</span> / <span style="color:#d93025;">마이너스</span></span>
+                        <span>• 저점대비: <span style="color:#1a73e8;">10%↓바닥</span> / <span style="color:#d93025;">30%↑과열</span></span>
                         <span>• PER: <span style="color:#1a73e8;">25↓저평가</span> / <span style="color:#d93025;">40↑과열</span></span>
                         <span>• 배당률: <span style="color:#1a73e8;">3%↑혜자</span> / <span style="color:#d93025;">1%↓낮음</span></span>
                     </div>
@@ -217,13 +238,11 @@ if __name__ == "__main__":
         d = get_stock_details(ticker)
         if not d: continue
         news = fetch_korean_news(brand)
-        
-        # 주가 움직임에 따른 컬러 설정
         accent_color = "#d93025" if d['pct'] > 0 else "#1a73e8"
         bg_light = "#fff5f5" if d['pct'] > 0 else "#f0f7ff"
 
         html += f"""
-        <div style="margin-bottom: 20px; background: #ffffff; border: 1px solid #e1e4e8; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;">
+        <div style="margin-bottom: 20px; background: #ffffff; border: 1px solid #e1e4e8; border-radius: 12px; overflow: hidden;">
             <div style="padding: 15px; background: {bg_light}; display: flex; justify-content: space-between; align-items: center; border-left: 5px solid {accent_color};">
                 <div style="font-size: 17px; font-weight: 800; color: #111;">{brand} <span style="font-weight: 400; font-size: 12px; color: #666;">{ticker}</span> {d['flags']}</div>
                 <div style="text-align: right;">
@@ -247,24 +266,15 @@ if __name__ == "__main__":
         """
         time.sleep(0.5)
 
-    html += """
-                <div style="text-align: center; margin-top: 40px; border-top: 1px solid #eee; padding-top: 20px;">
-                    <p style="font-size: 11px; color: #999;">본 리포트는 SPIGEN VIP 전용 데이터 모델(v4.0)로 생성되었습니다.<br>데이터 제공: Yahoo Finance / Google News</p>
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+    html += """</div></div></body></html>"""
     
     msg = MIMEMultipart("alternative")
     msg['Subject'] = f"[{mail_date}] 🏛️ 데일리 뉴스 프리미엄 리포트 ✨"
     msg['From'], msg['To'] = EMAIL_ADDRESS, ", ".join(RECIPIENTS)
     msg.attach(MIMEText(html, "html"))
-    
     try:
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
             s.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             s.send_message(msg)
-        print("✅ 발송 완료! (v4.0 프리미엄 디자인 버전)")
+        print("✅ 발송 완료! (v4.1 배당률 및 가이드 복구 완료)")
     except Exception as e: print(f"❌ 발송 실패: {e}")
